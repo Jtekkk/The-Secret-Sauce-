@@ -35,7 +35,9 @@ SecretSauceProcessor::SecretSauceProcessor()
 
     // Each instance ships as its own "unit off the line": random drift seed,
     // stable once saved with the session.
-    drift.setSeed (juce::Random::getSystemRandom().nextInt64());
+    const auto seed = juce::Random::getSystemRandom().nextInt64();
+    driftSeed.store (seed, std::memory_order_relaxed);
+    drift.setSeed (seed);            // safe: no audio thread yet
     recipe.setDrift (&drift);
 }
 
@@ -157,9 +159,15 @@ void SecretSauceProcessor::handleAsyncUpdate()
     updateHostDisplay (ChangeDetails().withLatencyChanged (true));
 }
 
+void SecretSauceProcessor::setDriftSeed (juce::int64 seed)
+{
+    driftSeed.store (seed, std::memory_order_relaxed);
+    driftSeedDirty.store (true, std::memory_order_release);
+}
+
 void SecretSauceProcessor::rerollDriftSeed()
 {
-    drift.setSeed (juce::Random::getSystemRandom().nextInt64());
+    setDriftSeed (juce::Random::getSystemRandom().nextInt64());
 }
 
 //==============================================================================
@@ -192,9 +200,29 @@ void SecretSauceProcessor::readRawParams (sauce::dsp::RawParams& out) const
     out.extSidechain = pExtSC->load() > 0.5f;
 }
 
-void SecretSauceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void SecretSauceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // Some hosts hand over more samples than they declared in prepareToPlay.
+    // Our buffers (dry copies, detector, oversamplers) are sized to the
+    // declared maximum, so larger blocks are processed in declared-size chunks.
+    if (prepared && buffer.getNumSamples() > currentBlockSize)
+    {
+        const int total = buffer.getNumSamples();
+        for (int start = 0; start < total; start += currentBlockSize)
+        {
+            const int len = juce::jmin (currentBlockSize, total - start);
+            juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(),
+                                           buffer.getNumChannels(), start, len);
+            processBlock (view, midi);
+        }
+        return;
+    }
+
+    // Apply a pending drift re-seed between blocks, never mid-recipe.
+    if (driftSeedDirty.exchange (false, std::memory_order_acquire))
+        drift.setSeed (driftSeed.load (std::memory_order_relaxed));
 
     auto mainBus = getBusBuffer (buffer, true, 0);
     const int numSamples  = buffer.getNumSamples();
@@ -366,7 +394,7 @@ void SecretSauceProcessor::setStateInformation (const void* data, int sizeInByte
     if (! root.isValid() || ! root.hasType ("SECRETSAUCE"))
         return;
 
-    drift.setSeed ((juce::int64) root.getProperty ("driftSeed", (juce::int64) 0x5EC5A0CE));
+    setDriftSeed ((juce::int64) root.getProperty ("driftSeed", (juce::int64) 0x5EC5A0CE));
 
     auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid())

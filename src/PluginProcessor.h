@@ -72,9 +72,11 @@ public:
     sauce::state::Snapshots snapshots { apvts };
     sauce::dsp::MeterValues meters;
 
-    /** Re-seat the analog drift RNG (new "unit from the production line"). */
+    /** Re-seat the analog drift RNG (new "unit from the production line").
+        Safe from any thread: the seed is applied on the audio thread at the
+        next block so the RNG state never changes mid-recipe. */
     void rerollDriftSeed();
-    juce::int64 getDriftSeed() const { return drift.getSeed(); }
+    juce::int64 getDriftSeed() const { return driftSeed.load (std::memory_order_relaxed); }
 
     /** Current total latency in samples (as reported to the host). */
     int getCurrentLatency() const { return totalLatency; }
@@ -84,6 +86,7 @@ private:
     void updateLatency();
     int  resolveOsIndex() const;         // param -> oversampler slot (0..4 = 1x..16x)
     void readRawParams (sauce::dsp::RawParams& out) const;
+    void setDriftSeed (juce::int64 seed);
 
     // --- Parameters (cached atomics) ------------------------------------------
     std::atomic<float>* pSauce = nullptr;      std::atomic<float>* pCharacter = nullptr;
@@ -128,6 +131,11 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmooth, deltaSmooth;
 
     juce::AudioBuffer<float> dryBuffer, dryAligned;
+
+    // Seed handoff message thread -> audio thread (drift RNG must only be
+    // re-seated between blocks, never during recipe.compute()).
+    std::atomic<juce::int64> driftSeed { 0x5EC5A0CE };
+    std::atomic<bool> driftSeedDirty { false };
 
     double currentSampleRate = 48000.0;
     int    currentBlockSize = 512;

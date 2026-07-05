@@ -162,6 +162,20 @@ static void testLifecycleAcrossFormats()
             proc.releaseResources();
         }
     }
+
+    // Hosts that lie: declare 512, then deliver 4096 in one call.
+    {
+        SecretSauceProcessor proc;
+        proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        setParam (proc, sauce::param::sauceAmt, 60.0f);
+
+        auto io = makeNoise (2, 4096);
+        juce::MidiBuffer midi;
+        proc.processBlock (io, midi);
+
+        check (allFinite (io, io.getNumSamples()), "oversized block (4096 into 512) survives");
+    }
 }
 
 static void testLatencyAndNull()
