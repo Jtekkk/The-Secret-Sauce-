@@ -422,6 +422,212 @@ static void testBlockSizeInvariance()
     check (diff < 0.02f, "512-sample vs 64-sample blocks agree (rms diff " + std::to_string (diff) + ")");
 }
 
+static void testOversamplingAlignment()
+{
+    section ("Oversampling settings stay latency-honest and null on tones");
+
+    const double sr = 48000.0;
+
+    for (float osChoice : { 2.0f, 3.0f, 4.0f, 5.0f })   // 2x, 4x, 8x, 16x
+    {
+        SecretSauceProcessor proc;
+        proc.setPlayConfigDetails (2, 2, sr, 512);
+        proc.prepareToPlay (sr, 512);
+        setNeutral (proc);
+        setParam (proc, sauce::param::oversampling, osChoice);
+
+        auto warm = makeSine (2, 8192, sr);
+        processBlocks (proc, warm, 512);
+
+        const int latency = proc.getLatencySamples();
+        const int n = 16384;
+        auto input = makeSine (2, n, sr, 997.0);
+        auto io = input;
+        processBlocks (proc, io, 512);
+
+        const float diff = rmsDiff (io, input, latency, 0, n - latency - 512);
+        check (diff < 5.0e-3f,
+               "os choice " + std::to_string ((int) osChoice) + " nulls at reported latency (rms "
+                   + std::to_string (diff) + ")");
+    }
+}
+
+static void testLinearPhaseLatency()
+{
+    section ("Linear-phase EQ reports honest latency");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setNeutral (proc);
+    setParam (proc, sauce::param::air, 60.0f);          // engage a HF band
+    setParam (proc, sauce::param::linearPhase, 1.0f);
+
+    const int minPhaseLatency = proc.getLatencySamples();
+
+    // Let the background IR build/load and the engagement flip happen.
+    for (int i = 0; i < 40; ++i)
+    {
+        auto warm = makeSine (2, 2048, sr);
+        processBlocks (proc, warm, 512);
+        juce::Thread::sleep (10);
+    }
+
+    const int latency = proc.getLatencySamples();
+    check (latency > minPhaseLatency + 500,
+           "linear phase raises reported latency (" + std::to_string (latency) + ")");
+
+    // A symmetric linear-phase FIR centres the impulse at the reported latency.
+    const int n = 16384;
+    juce::AudioBuffer<float> io (2, n);
+    io.clear();
+    io.setSample (0, 100, 1.0f);
+    io.setSample (1, 100, 1.0f);
+    processBlocks (proc, io, 512);
+
+    int peakPos = 0;
+    float peakVal = 0.0f;
+    const float* d = io.getReadPointer (0);
+    for (int i = 0; i < n; ++i)
+        if (std::abs (d[i]) > peakVal) { peakVal = std::abs (d[i]); peakPos = i; }
+
+    check (std::abs (peakPos - (100 + latency)) <= 2,
+           "linear-phase impulse centres at reported latency (expected "
+               + std::to_string (100 + latency) + ", got " + std::to_string (peakPos) + ")");
+}
+
+static void testLimiterCeiling()
+{
+    section ("Maximizer respects the ceiling");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setNeutral (proc);
+    setParam (proc, sauce::param::loud, 100.0f);
+    setParam (proc, sauce::param::ceiling, -1.0f);
+
+    auto warm = makeSine (2, 24000, sr, 120.0, 0.9f);
+    processBlocks (proc, warm, 512);
+
+    auto io = makeSine (2, 24000, sr, 120.0, 0.9f);
+    processBlocks (proc, io, 512);
+
+    float peak = 0.0f;
+    for (int ch = 0; ch < 2; ++ch)
+        peak = juce::jmax (peak, io.getMagnitude (ch, 4096, 24000 - 4096));
+
+    // -1 dBTP target; allow the documented transient-preserve overshoot.
+    check (peak <= sauce::dsp::dbToGain (-1.0f + 1.4f),
+           "steady-state peak stays near the ceiling (peak "
+               + std::to_string (sauce::dsp::gainToDb (peak)) + " dB)");
+    check (peak > 0.05f, "maximizer passes signal");
+}
+
+static void testAutoGainMatch()
+{
+    section ("Auto gain holds loudness through heavy processing");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setNeutral (proc);
+    setParam (proc, sauce::param::sauceAmt, 70.0f);
+    setParam (proc, sauce::param::heat, 60.0f);
+    setParam (proc, sauce::param::glue, 40.0f);
+    setParam (proc, sauce::param::autoGain, 1.0f);
+
+    // 6 s of programme so the estimators settle and the slew completes.
+    const float inAmp = 0.25f;
+    for (int i = 0; i < 12; ++i)
+    {
+        auto blockAudio = makeSine (2, 24000, sr, 220.0, inAmp);
+        processBlocks (proc, blockAudio, 512);
+    }
+
+    auto io = makeSine (2, 24000, sr, 220.0, inAmp);
+    processBlocks (proc, io, 512);
+
+    const float outRms = io.getRMSLevel (0, 4096, 24000 - 4096);
+    const float inRms  = inAmp * 0.7071f;
+    const float deltaDb = std::abs (sauce::dsp::gainToDb (outRms / inRms));
+
+    check (deltaDb < 2.5f,
+           "output loudness within 2.5 dB of input under heavy settings (delta "
+               + std::to_string (deltaDb) + " dB)");
+}
+
+static void testDeltaHearsColour()
+{
+    section ("Delta exposes added colour");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setNeutral (proc);
+    setParam (proc, sauce::param::sauceAmt, 70.0f);
+    setParam (proc, sauce::param::heat, 60.0f);
+    setParam (proc, sauce::param::delta, 1.0f);
+
+    auto warm = makeSine (2, 12000, sr, 220.0);
+    processBlocks (proc, warm, 512);
+
+    auto io = makeSine (2, 12000, sr, 220.0);
+    processBlocks (proc, io, 512);
+
+    const float rms = io.getRMSLevel (0, 6000, 4096);
+    check (rms > 1.0e-4f, "delta of a coloured chain is audible (rms " + std::to_string (rms) + ")");
+    check (rms < 0.5f, "delta is a residue, not the full signal (rms " + std::to_string (rms) + ")");
+}
+
+static void testMonoProcessing()
+{
+    section ("Mono bus processing");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (1, 1, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setParam (proc, sauce::param::sauceAmt, 60.0f);
+    setParam (proc, sauce::param::heat, 40.0f);
+    setParam (proc, sauce::param::width, 160.0f);      // must be a no-op in mono
+
+    auto io = makeSine (1, 8192, sr, 220.0);
+    processBlocks (proc, io, 512);
+
+    check (allFinite (io, io.getNumSamples()), "mono chain stays finite");
+    check (io.getRMSLevel (0, 4096, 2048) > 1.0e-3f, "mono chain passes signal");
+}
+
+static void testSidechainSmoke()
+{
+    section ("External sidechain path");
+
+    const double sr = 48000.0;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, sr, 512);
+    proc.prepareToPlay (sr, 512);
+    setParam (proc, sauce::param::extSidechain, 1.0f);
+    setParam (proc, sauce::param::glue, 60.0f);
+    setParam (proc, sauce::param::scHighpass, 120.0f);
+    setParam (proc, sauce::param::scLowpass, 8000.0f);
+
+    auto io = makeSine (2, 8192, sr, 220.0);
+    processBlocks (proc, io, 512);
+
+    check (allFinite (io, io.getNumSamples()), "ext sidechain enabled (bus absent) stays finite");
+}
+
 static void testCpuSmoke()
 {
     section ("CPU smoke (must run comfortably in realtime)");
@@ -469,6 +675,13 @@ int main()
     testParameterFuzz();
     testDenormalSafety();
     testBlockSizeInvariance();
+    testOversamplingAlignment();
+    testLinearPhaseLatency();
+    testLimiterCeiling();
+    testAutoGainMatch();
+    testDeltaHearsColour();
+    testMonoProcessing();
+    testSidechainSmoke();
     testCpuSmoke();
 
     std::printf ("\n%d checks, %d failure(s)\n", checks, failures);

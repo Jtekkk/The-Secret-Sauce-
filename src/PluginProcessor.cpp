@@ -226,7 +226,11 @@ void SecretSauceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     detector.update (settings.detector);
     lowEnd.update (settings.low);
-    eq.update (settings.eq);
+
+    auto eqSettings = settings.eq;
+    eqSettings.linearPhase = pLinPhase->load() > 0.5f;
+    eq.update (eqSettings);
+
     dynamics.update (settings.dyn);
 
     auto satSettings = settings.sat;
