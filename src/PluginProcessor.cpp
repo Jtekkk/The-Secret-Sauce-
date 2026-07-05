@@ -228,7 +228,10 @@ void SecretSauceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     lowEnd.update (settings.low);
     eq.update (settings.eq);
     dynamics.update (settings.dyn);
-    saturation.update (settings.sat);
+
+    auto satSettings = settings.sat;
+    satSettings.oversampledRate = currentSampleRate * (double) (1 << currentOsSlot);
+    saturation.update (satSettings);
     stereo.update (settings.stereo);
     maximizer.update (settings.max);
 
