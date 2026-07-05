@@ -46,6 +46,7 @@ namespace sauce::dsp
             float consoleAmt     = 0.0f;   // 0..1 console stage intensity
             float character      = 1.0f;   // 0 = vintage .. 1 = modern
             float chanDriveMul[2] { 1.0f, 1.0f }; // analog drift skew
+            double oversampledRate = 96000.0;     // actual rate process() runs at
             bool  active         = true;
         };
 
