@@ -99,6 +99,14 @@ These were requirements, not aspirations. Where each one lives:
 \* AAX requires the Avid AAX SDK: point `SECRET_SAUCE_AAX_SDK_PATH` at it and the target
 appears; signing for Pro Tools distribution is done with Avid/PACE tooling as usual.
 
+## Installing (Windows)
+
+Every push builds a Windows installer on CI: open the latest green run on the
+[Actions page](https://github.com/jtekkk/the-secret-sauce-/actions), and download the
+**secret-sauce-windows-installer** artifact. Run `TheSecretSauce-<version>-Windows-Setup.exe` —
+it installs the VST3 to the system VST3 folder (and optionally the standalone app), no
+dongle, no activation. macOS/Linux binaries are in the per-OS artifacts of the same run.
+
 ## Building
 
 Requirements: CMake ≥ 3.22, a C++20 compiler. JUCE 8.0.14 is fetched automatically (or point

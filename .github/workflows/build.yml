@@ -55,3 +55,21 @@ jobs:
             build/SecretSauce_artefacts/**/AU/**
             build/SecretSauce_artefacts/**/Standalone/**
           if-no-files-found: warn
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            installer\windows\SecretSauce.iss `
+            /DVersion=1.0.0 `
+            /DBuildDir=..\..\build\SecretSauce_artefacts\Release `
+            /DOutputDir=..\..\build\installer
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: secret-sauce-windows-installer
+          path: build/installer/*.exe
+          if-no-files-found: error
