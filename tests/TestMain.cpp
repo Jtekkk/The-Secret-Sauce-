@@ -540,6 +540,43 @@ static void testLimiterCeiling()
            "steady-state peak stays near the ceiling (peak "
                + std::to_string (sauce::dsp::gainToDb (peak)) + " dB)");
     check (peak > 0.05f, "maximizer passes signal");
+
+    // Adversarial case: single-sample spikes riding a quiet sine, auto-gain ON
+    // (which sits after the limiter). The Ceiling promise must hold on the
+    // FINAL output — this is the regression test for the one-pole-attack
+    // overshoot and the post-limiter gain staging.
+    {
+        SecretSauceProcessor spiky;
+        spiky.setPlayConfigDetails (2, 2, sr, 512);
+        spiky.prepareToPlay (sr, 512);
+        setNeutral (spiky);
+        setParam (spiky, sauce::param::loud, 100.0f);
+        setParam (spiky, sauce::param::ceiling, -1.0f);
+        setParam (spiky, sauce::param::autoGain, 1.0f);
+
+        auto makeSpiky = [&] (int n)
+        {
+            auto b = makeSine (2, n, sr, 220.0, 0.25f);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 300; i < n; i += 1553)
+                    b.getWritePointer (ch)[i] = (i / 1553) % 2 == 0 ? 2.0f : -2.0f;
+            return b;
+        };
+
+        auto spikyWarm = makeSpiky (48000);
+        processBlocks (spiky, spikyWarm, 512);
+
+        auto io = makeSpiky (48000);
+        processBlocks (spiky, io, 512);
+
+        float spikePeak = 0.0f;
+        for (int ch = 0; ch < 2; ++ch)
+            spikePeak = juce::jmax (spikePeak, io.getMagnitude (ch, 0, io.getNumSamples()));
+
+        check (spikePeak <= sauce::dsp::dbToGain (-1.0f) + 1.0e-4f,
+               "spikes + auto-gain never pass the ceiling (peak "
+                   + std::to_string (sauce::dsp::gainToDb (spikePeak)) + " dB)");
+    }
 }
 
 static void testAutoGainMatch()

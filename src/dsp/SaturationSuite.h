@@ -85,7 +85,12 @@ namespace sauce::dsp
             params = p;
             const double r = juce::jmax (8000.0, p.oversampledRate);
             if (! juce::exactlyEqual (r, currentRate))
+            {
                 updateForRate (r);         // cheap retune, no allocation
+                resetStages();             // stale ADAA/filter history belongs
+                                           // to the old rate; the processor
+                                           // resets the oversampler in step
+            }
         }
 
         /** Process at the oversampled rate. */
@@ -213,30 +218,37 @@ namespace sauce::dsp
         // Small building blocks
         // ---------------------------------------------------------------------
 
-        /** log(cosh(x)) evaluated without overflow: |x| + log1p(e^{-2|x|}) - log 2. */
-        static float logCosh (float x)
+        /** log(cosh(x)) evaluated without overflow: |x| + log1p(e^{-2|x|}) - log 2.
+            Double precision: F grows like |x|, so the ADAA difference F - F1
+            cancels catastrophically in float at high drive (audible -40 dB
+            crackle at waveform crests with hot inputs). */
+        static double logCosh (double x)
         {
-            const float a = std::abs (x);
-            return a + std::log1p (std::exp (-2.0f * a)) - 0.69314718056f;
+            const double a = std::abs (x);
+            return a + std::log1p (std::exp (-2.0 * a)) - 0.6931471805599453;
         }
 
-        /** First-order ADAA tanh: exact antiderivative ratio with midpoint fallback. */
+        /** First-order ADAA tanh: exact antiderivative ratio with midpoint
+            fallback. The fallback threshold scales with signal magnitude so the
+            relative cancellation error stays bounded across the drive range. */
         struct AdaaTanh
         {
-            float x1 = 0.0f, F1 = 0.0f;
+            double x1 = 0.0, F1 = 0.0;
 
-            void reset() { x1 = 0.0f; F1 = 0.0f; }
+            void reset() { x1 = 0.0; F1 = 0.0; }
 
-            float process (float x)
+            float process (float xIn)
             {
-                const float F  = logCosh (x);
-                const float dx = x - x1;
-                const float y  = std::abs (dx) > 1.0e-4f
+                const double x  = xIn;
+                const double F  = logCosh (x);
+                const double dx = x - x1;
+                const double eps = 1.0e-4 * juce::jmax (1.0, std::abs (x), std::abs (x1));
+                const double y  = std::abs (dx) > eps
                                     ? (F - F1) / dx
-                                    : std::tanh (0.5f * (x + x1));
+                                    : std::tanh (0.5 * (x + x1));
                 x1 = x;
                 F1 = F;
-                return y;
+                return (float) y;
             }
         };
 

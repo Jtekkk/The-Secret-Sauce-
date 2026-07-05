@@ -128,7 +128,28 @@ The harness is a miniature host, run by CI on every push:
 | Block invariance | 512-sample and 64-sample runs of the same audio agree |
 | CPU smoke | faster than realtime at 4× oversampling on a modest VM |
 
-## 10. Formats and licensing
+## 10. Reviewed trade-offs (known, accepted)
+
+An adversarial review pass verified the matched-EQ math (analog magnitude reproduced at
+DC/f0/Nyquist to ≤ 1e-10 dB), the FIR construction (impulse centre exactly at the reported
+latency), the limiter's windowed-minimum, and the latency budget. It also surfaced issues
+that were fixed (final ceiling clamps in and after the limiter, exact De Man/ITU
+K-weighting, double-precision ADAA antiderivatives, saturation state reset on oversampling
+switches) — and a few consciously accepted trade-offs:
+
+- **Ceiling semantics**: with Wow engaged, the ceiling is enforced on the final wet output
+  (post auto-gain/output trim). With Wow at 0 the plugin never clips your headroom —
+  Ceiling belongs to the loudness section.
+- **Linear-phase LF accuracy at 44.1 kHz**: the 2047-tap FIR reads ~0.6 dB shy of the
+  analog target at 40 Hz with Weight fully cranked (10.8 Hz grid resolution). Longer FIRs
+  would cost double the latency; minimum-phase mode is exact.
+- **Block-rate adaptive release**: limiter/compressor release constants update once per
+  block, so bit-exact output varies ~-54 dB between different host buffer sizes. Inaudible;
+  accepted for CPU.
+- **Transient preserve** trades up to ~0.3 dB of the inter-sample guard for punch — the
+  ceiling itself is still never exceeded.
+
+## 11. Formats and licensing
 
 One CMake project produces VST3, AU (macOS), AAX (with the Avid SDK path set) and a
 standalone app; macOS builds are universal (arm64 + x86_64) by default. There is no copy

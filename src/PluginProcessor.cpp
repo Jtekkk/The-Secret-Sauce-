@@ -338,6 +338,20 @@ void SecretSauceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     outGain.setTargetDb (pOutput->load());
     outGain.applyTo (mainBus, numSamples);
 
+    // With Wow engaged, Ceiling is a promise about the *output*, not just the
+    // limiter stage — auto-gain and output trim sit after the maximizer and
+    // could otherwise push the wet path back over it.
+    if (settings.max.active)
+    {
+        const float ceilLin = sauce::dsp::dbToGain (raw.ceilingDb);
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            float* data = mainBus.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                data[i] = juce::jlimit (-ceilLin, ceilLin, data[i]);
+        }
+    }
+
     // ---- Mix (parallel processing) & Delta monitor ----------------------------
     mixSmooth.setTargetValue (juce::jlimit (0.0f, 1.0f, pMix->load() * 0.01f));
     deltaSmooth.setTargetValue (pDelta->load() > 0.5f ? 1.0f : 0.0f);

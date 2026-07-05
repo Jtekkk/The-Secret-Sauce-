@@ -39,11 +39,38 @@ namespace sauce::dsp
         {
             using Coeffs = juce::dsp::IIR::Coefficients<float>;
 
-            // Stage 1: +4 dB high shelf around 1.68 kHz ("head" filter)
-            auto shelf = Coeffs::makeHighShelf (sampleRate, 1681.97, 0.7071f,
-                                                dbToGain (3.99984f));
-            // Stage 2: high-pass at ~38 Hz
-            auto hp = Coeffs::makeHighPass (sampleRate, 38.13547, 0.5003f);
+            // BS.1770-4 pre-filter pair computed with the De Man closed form,
+            // which reproduces the ITU reference tables exactly at any sample
+            // rate. (RBJ makeHighShelf/makeHighPass deviate by up to 0.5 dB
+            // around 1.6 kHz — enough to skew LUFS on midrange-heavy material.)
+            const double pi = juce::MathConstants<double>::pi;
+
+            // Stage 1: "head" high shelf.
+            const double f0 = 1681.9744509555319;
+            const double G  = 3.99984385397;
+            const double Qs = 0.7071752369554193;
+            const double K  = std::tan (pi * f0 / sampleRate);
+            const double Vh = std::pow (10.0, G / 20.0);
+            const double Vb = std::pow (Vh, 0.4996667741545416);
+            const double a0 = 1.0 + K / Qs + K * K;
+
+            Coeffs::Ptr shelf = new Coeffs ((float) ((Vh + Vb * K / Qs + K * K) / a0),
+                                            (float) (2.0 * (K * K - Vh) / a0),
+                                            (float) ((Vh - Vb * K / Qs + K * K) / a0),
+                                            1.0f,
+                                            (float) (2.0 * (K * K - 1.0) / a0),
+                                            (float) ((1.0 - K / Qs + K * K) / a0));
+
+            // Stage 2: high-pass with the ITU's unnormalised numerator [1 -2 1].
+            const double fh = 38.13547087602444;
+            const double Qh = 0.5003270373238773;
+            const double Kh = std::tan (pi * fh / sampleRate);
+            const double ah = 1.0 + Kh / Qh + Kh * Kh;
+
+            Coeffs::Ptr hp = new Coeffs (1.0f, -2.0f, 1.0f,
+                                         1.0f,
+                                         (float) (2.0 * (Kh * Kh - 1.0) / ah),
+                                         (float) ((1.0 - Kh / Qh + Kh * Kh) / ah));
 
             for (int ch = 0; ch < juce::jmin (numChannels, 2); ++ch)
             {

@@ -348,11 +348,20 @@ namespace sauce::dsp
                 int r = w - lookahead;
                 if (r < 0) r += cap;
 
-                const float g = gainEnv * trimG;
+                // Safety bound: the one-pole attack covers ~95 % of the needed
+                // attenuation within the lookahead, so deep instantaneous GR can
+                // leave a residue past the ceiling. Clamp the limited signal at
+                // the true ceiling (threshold is ceiling - 0.3 dB guard, so the
+                // clamp engages only on that residue). Scaled by 1/wet so the
+                // deliberate melt-to-unity at tiny amounts is never clipped.
+                const float ceilNow = thrNow * 1.03514f;   // + the 0.3 dB guard
+                const float bound   = wet > 1.0e-3f ? ceilNow / wet : 1.0e18f;
+
                 for (int ch = 0; ch < channels; ++ch)
                 {
                     ring[ch][w] = xd[ch];
-                    io[ch][i] = ring[ch][r] * g;
+                    const float y = juce::jlimit (-bound, bound, ring[ch][r] * gainEnv);
+                    io[ch][i] = y * trimG;
                 }
 
                 if (++w >= cap) w = 0;

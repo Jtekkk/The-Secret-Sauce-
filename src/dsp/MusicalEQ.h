@@ -256,7 +256,12 @@ namespace sauce::dsp
         //======================================================================
         static constexpr int maxChannels = 2;
         static constexpr int numBands    = 9;
-        static constexpr int numIrSlots  = 4;     // rotating preallocated IR storage
+        // Rotating preallocated IR storage. The convolver's background loader
+        // copies a slot after we hand it over; 8 slots x >= 60 ms per rebuild
+        // gives it >= ~480 ms before a slot is rewritten — comfortably beyond
+        // any realistic loader stall (a torn IR would be an artefact, never
+        // instability, but headroom is cheap).
+        static constexpr int numIrSlots  = 8;
 
         static constexpr float  gainSkipDb   = 0.05f;   // below this a band is identity
         static constexpr float  redesignDb   = 0.01f;   // biquad recompute threshold
