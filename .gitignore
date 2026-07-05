@@ -1,0 +1,17 @@
+# Build trees
+build/
+cmake-build-*/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# JUCE local artefacts
+JuceLibraryCode/
+*.jucer.bak
