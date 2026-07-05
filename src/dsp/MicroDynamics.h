@@ -79,6 +79,7 @@ namespace sauce::dsp
 
             // Sample-rate-only smoothing constants.
             progFall = coefForMs (1000.0f);   // programme level falls lazily
+            progAcq  = coefForMs (30.0f);     // ...but acquires fresh material fast
             makeupCf = coefForMs (400.0f);    // auto makeup drifts, never pumps
             transCf  = coefForMs (250.0f);    // transient-ness averaging
             shapeCf  = coefForMs (0.6f);      // de-clicks the transient gains
@@ -212,9 +213,14 @@ namespace sauce::dsp
                 }
 
                 // Programme level (dB): quick up so the auto threshold finds
-                // the material, lazy down so gaps don't drag it under.
+                // the material, lazy down so gaps don't drag it under. When
+                // the follower is far below the signal (cold start, sudden
+                // section jump) it snaps up fast so glue never dives deep
+                // while "finding" the level.
                 {
-                    const float cf = ctrlDb > progDb ? times.progRise : progFall;
+                    const float gap = ctrlDb - progDb;
+                    const float cf  = gap > 0.0f ? (gap > 6.0f ? progAcq : times.progRise)
+                                                 : progFall;
                     progDb = juce::jlimit (-120.0f, 80.0f, ctrlDb + cf * (progDb - ctrlDb));
                 }
                 const float threshDb = juce::jmax (progDb, -45.0f) - offsetDb;
@@ -231,7 +237,7 @@ namespace sauce::dsp
                         const float k = over + 0.5f * kneeDb;
                         grTarget = grSlope * k * k / (2.0f * kneeDb);
                     }
-                    grTarget = juce::jmin (grTarget, 24.0f);
+                    grTarget = juce::jmin (grTarget, 9.0f);   // glue is a leaner, never a squeezer
                 }
 
                 // Per-channel GR ballistics (drift-skewed timing), linked gain.
@@ -482,7 +488,7 @@ namespace sauce::dsp
 
         // Coefficients.
         TimeSet times;
-        float progFall = 0.0f, makeupCf = 0.0f, transCf = 0.0f, shapeCf = 0.0f;
+        float progFall = 0.0f, progAcq = 0.0f, makeupCf = 0.0f, transCf = 0.0f, shapeCf = 0.0f;
         float cachedChr = -10.0f, cachedRel = -1.0f, cachedT0 = 0.0f, cachedT1 = 0.0f;
 
         // Parameter smoothing & metering.
