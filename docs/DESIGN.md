@@ -126,7 +126,19 @@ The harness is a miniature host, run by CI on every push:
 | Fuzz | 40 rounds of random parameters stay finite |
 | Denormals | 1e-30 inputs and post-signal silence don't stall or explode |
 | Block invariance | 512-sample and 64-sample runs of the same audio agree |
+| Preset contract | a preset sets the sound and leaves monitoring/quality/routing alone |
 | CPU smoke | faster than realtime at 4× oversampling on a modest VM |
+
+### Presets vs. session controls
+
+`applyPreset` resets every parameter to its default before applying the preset's values, so
+a preset fully describes the sound it makes rather than inheriting whatever the last one
+left behind. Five parameters are deliberately exempt (`state::isSessionControl`): **Bypass**
+and **Delta** are monitoring states, **oversampling** and **linear phase** are the user's
+CPU/quality budget, and **external sidechain** follows the host's routing. None of them is
+part of "how this preset sounds", and silently resetting them — dropping an 8× render back
+to Auto, or cancelling Delta mid-audition — is how a preset menu loses trust. The harness
+asserts both halves: session controls survive a load, and no factory preset writes one.
 
 ## 10. Reviewed trade-offs (known, accepted)
 
