@@ -8,9 +8,12 @@
 // =============================================================================
 
 #include "../src/PluginProcessor.h"
+#include "../src/state/Presets.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <random>
+#include <string>
 
 namespace
 {
@@ -340,6 +343,64 @@ static void testSnapshots()
 
     other.snapshots.recall (0);
     check (std::abs (getParam (other, p::sauceAmt) - 20.0f) < 1.0e-3f, "snapshot A survives state reload");
+}
+
+static void testPresetContract()
+{
+    section ("Presets describe the sound, not the session");
+
+    namespace p = sauce::param;
+
+    SecretSauceProcessor proc;
+    proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+    proc.prepareToPlay (48000.0, 512);
+
+    // The user's own session state: monitoring mode, CPU budget, host routing.
+    setParam (proc, p::oversampling, 4.0f);   // 8x — chosen for a render
+    setParam (proc, p::linearPhase, 1.0f);
+    setParam (proc, p::delta, 1.0f);
+    setParam (proc, p::extSidechain, 1.0f);
+
+    // ...and a sound-shaping value the preset is expected to overwrite.
+    setParam (proc, p::warmth, 77.0f);
+
+    const auto& presets = sauce::state::factoryPresets();
+    const auto vocalSilk = std::find_if (presets.begin(), presets.end(),
+                                         [] (const sauce::state::Preset& pr)
+                                         { return std::string (pr.name) == "Vocal Silk"; });
+    check (vocalSilk != presets.end(), "factory preset 'Vocal Silk' exists");
+
+    if (vocalSilk == presets.end())
+        return;
+
+    sauce::state::applyPreset (proc.apvts, *vocalSilk);
+
+    check (std::abs (getParam (proc, p::oversampling) - 4.0f) < 1.0e-3f,
+           "preset load keeps the user's oversampling choice");
+    check (getParam (proc, p::linearPhase) > 0.5f, "preset load keeps linear phase");
+    check (getParam (proc, p::delta) > 0.5f,       "preset load keeps delta monitoring");
+    check (getParam (proc, p::extSidechain) > 0.5f, "preset load keeps sidechain routing");
+
+    // Sound-shaping parameters still come wholly from the preset: Vocal Silk does
+    // not set Warmth, so it must fall back to the default rather than keep 77.
+    check (std::abs (getParam (proc, p::warmth)) < 1.0e-3f,
+           "preset load resets unlisted sound parameters to default");
+    check (std::abs (getParam (proc, p::air) - 25.0f) < 1.0e-3f,
+           "preset load applies its own values");
+
+    // Every preset must stay inside the session-control contract.
+    for (const auto& preset : presets)
+        for (const auto& [id, value] : preset.values)
+        {
+            juce::ignoreUnused (value);
+            if (sauce::state::isSessionControl (id))
+            {
+                check (false, std::string ("preset '") + preset.name + "' must not set session control " + id);
+                return;
+            }
+        }
+
+    check (true, "no factory preset writes a session control");
 }
 
 static void testParameterFuzz()
@@ -723,6 +784,7 @@ int main()
     testMixAndDelta();
     testStateRoundTrip();
     testSnapshots();
+    testPresetContract();
     testParameterFuzz();
     testDenormalSafety();
     testBlockSizeInvariance();

@@ -66,7 +66,9 @@ These were requirements, not aspirations. Where each one lives:
 - **CPU efficiency** — modules true-bypass when idle, oversampling is selectable, and the
   offline harness asserts faster-than-realtime processing at 4× oversampling.
 - **Preset quality** — factory presets are curated starting points that teach the plugin
-  (`src/state/Presets.h`), never max-settings demos.
+  (`src/state/Presets.h`), never max-settings demos. A preset describes a *sound*: loading
+  one never moves your monitoring (Bypass, Delta), your CPU budget (oversampling, linear
+  phase) or your host routing (external sidechain).
 - **Consistent gain staging** — input/output trims, per-stage level compensation in the
   saturators, and K-weighted auto-gain referenced to the chain input.
 - **Stable, boring reliability** — the test harness (`tests/TestMain.cpp`) drives the real

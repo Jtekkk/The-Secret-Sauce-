@@ -111,16 +111,32 @@ namespace sauce::state
         return presets;
     }
 
-    /** Reset every parameter to default, then apply the preset's values. */
+    /** Controls a preset must never touch: they describe the session, not the sound.
+        Bypass and Delta are monitoring states, oversampling and linear phase are the
+        user's CPU/quality budget, and the sidechain switch follows the host's routing.
+        Silently resetting any of them on a preset load is the kind of surprise that
+        makes people stop trusting the preset menu. */
+    inline bool isSessionControl (const juce::String& id)
+    {
+        namespace p = sauce::param;
+
+        return id == p::bypass || id == p::delta || id == p::oversampling
+            || id == p::linearPhase || id == p::extSidechain;
+    }
+
+    /** Reset every sound-shaping parameter to default, then apply the preset's values. */
     inline void applyPreset (juce::AudioProcessorValueTreeState& apvts, const Preset& preset)
     {
         if (auto* um = apvts.undoManager)
             um->beginNewTransaction (juce::String ("Load preset: ") + preset.name);
 
-        // Start from defaults so presets fully describe themselves.
+        // Start from defaults so presets fully describe the sound they make.
         for (auto* param : apvts.processor.getParameters())
             if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
             {
+                if (isSessionControl (ranged->paramID))
+                    continue;
+
                 ranged->beginChangeGesture();
                 ranged->setValueNotifyingHost (ranged->getDefaultValue());
                 ranged->endChangeGesture();
